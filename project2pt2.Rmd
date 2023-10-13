@@ -1,0 +1,270 @@
+---
+title: 'DATA 607 Project 2: Doctorate Recipients'
+author: "Kristin Lussi"
+date: "2023-10-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+In this analysis, I am working with a dataset of research doctorate recipients and their fields of doctorate, which has been provided by the National Science Foundation.
+
+One question that I would like to answer is as follows:
+
+*How has the makeup of doctorate degrees changed over the years?*
+
+## Load Packages
+```{r, message = FALSE, warning = FALSE, result = FALSE}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+## Load the Data from Github
+```{r, warning = FALSE, message = FALSE}
+# retrieve the csv file from GitHub
+urlfile <- URLencode("https://raw.githubusercontent.com/kristinlussi/607Project2/main/nsf24300-tab001-003.xlsx - Table 1–3.csv")
+
+# read the csv
+doctorateData <- read_csv(url(urlfile), show_col_types = FALSE)
+
+# show a glimpse of the data, obviously this needs to be cleaned
+head(doctorateData)
+```
+
+## Clean the Data
+
+In this section, we will clean the data to prepare it for analysis.
+
+```{r, message = FALSE, warning = FALSE}
+
+doctorateData <- doctorateData %>%
+  # remove the first 4 rows
+  filter(`Table 1-3` != "All fields") %>%
+  filter(`Table 1-3` != "Field of doctorate") %>%
+  filter(`Table 1-3` != "(Number and percent)") %>%
+  filter(`Table 1-3` != 
+           "Research doctorate recipients, by historical major field of doctorate: Selected years, 1992–2022") %>%
+  ## remove the rows that specify the field category
+  ## the field categories are: 
+  # life sciences
+  filter(`Table 1-3` != "Life sciences") %>%
+  # physical sciences and earth sciences
+  filter(`Table 1-3` != "Physical sciences and earth sciences") %>%
+  # mathematics and computer sciences
+  filter(`Table 1-3` != "Mathematics and computer sciences") %>%
+  # psychology and social sciences
+  filter(`Table 1-3` != "Psychology and social sciences") %>%
+  # engineering
+  filter(`Table 1-3` != "Engineering") %>%
+  # education
+  filter(`Table 1-3` != "Education") %>%
+  # humanities and arts
+  filter(`Table 1-3` != "Humanities and arts") %>%
+  # other
+  filter(`Table 1-3` != "Other") 
+
+# rename column names
+colnames(doctorateData) <- c("FieldofDoctorate", "1992_Number", "1992_Percent", 
+                             "1997_Number", "1997_Percent", "2002_Number", "2002_Percent", 
+                             "2007_Number", "2007_Percent", "2012_Number", "2012_Percent", 
+                             "2017_Number", "2017_Percent", "2022_Number", "2022_Percent")
+
+# change the percent columns to decimals
+# change the number columns to integers
+doctorateData <- doctorateData %>%
+  mutate_at(vars("1992_Percent", "1997_Percent",
+                 "2002_Percent", "2007_Percent",
+                 "2012_Percent", "2017_Percent",
+                 "2022_Percent"), ~ as.numeric(gsub(",", "", .))) %>%
+  mutate_at(vars("1992_Number", "1997_Number",
+                 "2002_Number", "2007_Number",
+                 "2012_Number", "2017_Number",
+                 "2022_Number"), ~ as.integer(gsub(",", "", .))) 
+
+# pivot number columns into one column
+doctorateData <- pivot_longer(doctorateData, 
+                              c("1992_Number", "1997_Number", 
+                                "2002_Number", "2007_Number", 
+                                "2012_Number", "2017_Number", 
+                                "2022_Number"), names_to = "Year", values_to = "Number", values_drop_na = FALSE) 
+
+# pivot percent columns into one column
+doctorateData <- pivot_longer(doctorateData, 
+                              c("1992_Percent", "1997_Percent", 
+                                "2002_Percent", "2007_Percent", 
+                                "2012_Percent", "2017_Percent", 
+                                "2022_Percent"), names_to = "Year_Percent", values_to = "Percent", values_drop_na = FALSE)
+
+doctorateData <- doctorateData %>%
+  # remove "_Number" from year column to isolate the year
+  mutate(across(Year, ~gsub("_Number", "", .))) %>%
+  # remove "_Percent" from year_percent column to isolate the year
+  mutate(across(Year_Percent, ~gsub("_Percent", "", .))) %>%
+  # convert the Year & Year_Percent columns to integers
+  mutate_at(vars(Year, Year_Percent), as.integer)
+
+# Filter rows where "Year" and "Year_Percent" match
+doctorateData <- doctorateData %>%
+  # filter where Year = Year_Percent
+  filter(Year == Year_Percent) %>%
+  select(FieldofDoctorate, Year, Number, Percent) %>%
+  as.data.frame()
+
+# make a column for category type: life sciences, physical sciences & earth sciences, 
+# mathematics and computer sciences, psychology and social sciences, 
+# engineering, education, humanities and arts, other
+doctorateData <- doctorateData %>%
+  mutate(FieldCategory = case_when(
+    FieldofDoctorate == "Agricultural sciences and natural resources" ~ "Life sciences",
+    FieldofDoctorate == "Biological and biomedical sciences" ~ "Life sciences",
+    FieldofDoctorate == "Health sciences" ~ "Life sciences",
+    FieldofDoctorate == "Chemistry" ~ "Physical sciences",
+    FieldofDoctorate == "Geosciences, atmospheric sciences, and ocean sciences" ~ "Physical sciences",
+    FieldofDoctorate == "Physics and astronomy" ~ "Physical sciences",
+    FieldofDoctorate == "Computer and information sciences" ~ "Mathematics and computer sciences",
+    FieldofDoctorate == "Mathematics and statistics" ~ "Mathematics and computer sciences",
+    FieldofDoctorate == "Psychology" ~ "Social sciences",
+    FieldofDoctorate == "Anthropology" ~ "Social sciences",
+    FieldofDoctorate == "Economics" ~ "Social sciences",
+    FieldofDoctorate == "Political science and government" ~ "Social sciences",
+    FieldofDoctorate == "Sociology" ~ "Social sciences",
+    FieldofDoctorate == "Other social sciences" ~ "Social sciences",
+    FieldofDoctorate == "Aerospace, aeronautical, and astronautical engineering" ~ "Engineering",
+    FieldofDoctorate == "Bioengineering and biomedical engineering" ~ "Engineering",
+    FieldofDoctorate == "Chemical engineering" ~ "Engineering",
+    FieldofDoctorate == "Civil engineering" ~ "Engineering",
+    FieldofDoctorate == "Electrical, electronics, and communications engineering" ~ "Engineering",
+    FieldofDoctorate == "Industrial and manufacturing engineering" ~ "Engineering",
+    FieldofDoctorate == "Materials science engineering" ~ "Engineering",
+    FieldofDoctorate == "Mechanical engineering" ~ "Engineering",
+    FieldofDoctorate == "Other engineering" ~ "Engineering",
+    FieldofDoctorate == "Education administration" ~ "Education",
+    FieldofDoctorate == "Education research" ~ "Education",
+    FieldofDoctorate == "Teacher education" ~ "Education",
+    FieldofDoctorate == "Teaching fields" ~ "Education",
+    FieldofDoctorate == "Other education" ~ "Education",
+    FieldofDoctorate == "Foreign languages and literature" ~ "Arts",
+    FieldofDoctorate == "History" ~ "Arts",
+    FieldofDoctorate == "Letters" ~ "Arts",
+    FieldofDoctorate == "Other humanities and arts" ~ "Arts",
+    FieldofDoctorate == "Business management and administration" ~ "Other",
+    FieldofDoctorate == "Communication" ~ "Other",
+    FieldofDoctorate == "Non-science and engineering fields nec" ~ "Other",
+    TRUE ~ "Other Category" 
+  )) 
+
+doctorateData$Percent <- doctorateData$Percent / 100
+
+doctorateData <- doctorateData %>%
+  select(FieldCategory, FieldofDoctorate, Year, Number, Percent)
+
+# create a column for percent of field category for each year
+doctorateData <- doctorateData %>%
+  group_by(Year) %>%
+  mutate(
+    YearTotal = sum(Number),
+    PercentYearTotal = Number / YearTotal
+  )
+
+colnames(doctorateData)[colnames(doctorateData) == "Percent"] <- "PercentofTotal"
+
+head(doctorateData)
+```
+
+## Analysis
+
+In this section, we will use the cleaned data to determine how the makeup of doctorate degrees has changed over the years. 
+
+Here is a graph showing the makeup of doctorate degrees by category for each year. 
+```{r}
+ggplot(doctorateData) +
+  geom_bar(aes(x = Year, y = Number, fill = FieldCategory), stat = "identity") + 
+  ggtitle(
+    "Categories of Doctorate Recipients Over the Years",
+    subtitle = "Frequency From 1992 - 2022"
+  ) +
+  labs(
+    x = "Year",
+    y = "Count"
+  ) +
+  scale_fill_discrete(name = "Field Category") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+```{r}
+ggplot(doctorateData) +
+  geom_bar(aes(x = Year, y = PercentofTotal, fill = FieldCategory), stat = "identity") + 
+  ggtitle(
+    "Categories of Doctorate Recipients Over the Years",
+    subtitle = "Percent of Total From 1992 - 2022"
+  ) +
+  labs(
+    x = "Year",
+    y = "Percent"
+  ) +
+  scale_fill_discrete(name = "Field Category") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+From the above graphs, we can see that education doctorate recipient have decreased in frequency over the past 30 years, while engineering, life sciences, and mathematics & computer science doctorate recipient frequencies have increased. Physical sciences social sciences, arts, and other doctorate recipient frequencies seem to have stayed relatively steady. 
+
+## Recommendations
+
+For future analyses, it would be interesting to see how each individual field has changed over the past 30 years. 
+
+For example, we will look at the mathematics and computer sciences category. 
+```{r}
+# subset the data
+mathComputerData <- doctorateData %>%
+  filter(FieldCategory == "Mathematics and computer sciences")
+
+ggplot(mathComputerData) +
+  geom_bar(aes(x = Year, y = Number, fill = FieldofDoctorate), stat = "identity") + 
+  ggtitle(
+    "Mathematics and Computer Sciences\nDoctorate Recipients Over the Years",
+    subtitle = "Frequency From 1992 - 2022"
+  ) +
+  labs(
+    x = "Year",
+    y = "Count"
+  ) +
+  scale_fill_discrete(name = "Field") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+As you can see from the above graph, both computer & information sciences and mathematics & statistics have increased in popularity over the past 30 years. 
+
+```{r}
+# subset the data
+educationData <- doctorateData %>%
+  filter(FieldCategory == "Education")
+
+ggplot(educationData) +
+  geom_bar(aes(x = Year, y = Number, fill = FieldofDoctorate), stat = "identity") + 
+  ggtitle(
+    "Education Doctorate Recipients Over the Years",
+    subtitle = "Frequency From 1992 - 2022"
+  ) +
+  labs(
+    x = "Year",
+    y = "Count"
+  ) +
+  scale_fill_discrete(name = "Field") +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+As you can see from the above graph, education administration has decreased in popularity over the past 30 years. 
+
+It would be interesting to see the trends for each category, and to possibly do outside research as to why certain fields have increased or decreased in popularity. For example, we can ask "Has the popularity of education doctorate programs declined due to decreasing teacher salaries year after year?"
+
+## Sources
+
+National Center for Science and Engineering Statistics, Survey of Earned Doctorates,  https://ncses.nsf.gov/pubs/nsf24300/table/1-3 Accessed 12 Oct. 2023. 
