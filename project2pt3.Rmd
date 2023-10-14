@@ -1,0 +1,189 @@
+---
+title: 'Project 2: Probable Maximum Loss'
+author: "Kristin Lussi"
+date: "2023-10-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this project, I am working with a dataset from the Organization of American States on a Probable Maximum Loss study in three Caribbean Island States: Dominica, St Lucia, and St Kitts and Nevis.
+
+I wanted to work with the "50% Upper Prediction Limit MLE 50 Year Mean Return Period Event" tables for each of the three Carribbean countries. These data tables were provided as an image scan, so in order to manipulate the data, I loaded these three tables into a SQL database. 
+
+In my analysis, I want to see how the PMLs compare for certain infrastructures in each country. 
+
+## Load Packages
+
+```{r, warning = FALSE, message = FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+## Load Data from SQL
+
+```{r, message = FALSE, warning = FALSE}
+library(RMySQL)
+host <- "localhost"
+source("logincredentials.R")
+dbname <- "dominica_PML"
+
+# Establish the database connection
+con <- dbConnect(MySQL(), user = user, password = password, dbname = dbname, host = host)
+
+query1 <- "SELECT * FROM dominica_50p_50year"
+query2 <- "SELECT * FROM stlucia_50p_50year"
+query3 <- "SELECT * FROM stkitts_50p_50year"
+
+# Fetch dominica data into a data frame
+dominicaPML <- dbGetQuery(con, query1) %>%
+  as.data.frame()
+
+# Fetch St Lucia data into data frame
+stluciaPML <- dbGetQuery(con, query2) %>%
+  as.data.frame()
+
+# Fetch St Kitts & Nevis data into data frame
+stkittsnevisPML <- dbGetQuery(con, query3) %>%
+  as.data.frame()
+```
+
+## Clean the Data
+
+### Clean the Dominica data
+```{r}
+## Clean the Dominica data
+# replace blanks with NA
+dominicaPML$InfrastructureElement <- ifelse(grepl("^\\s*$", dominicaPML$InfrastructureElement), NA, dominicaPML$InfrastructureElement)
+  
+# fill empty cells in Infrastructure column
+dominicaPML <- fill(dominicaPML, InfrastructureElement, .direction = "down")
+dominicaPML <- unite(dominicaPML, InfrastructureElement, blank, col = InfrastructureElement, sep = " ")
+
+# replace zeros with NAs
+dominicaPML[dominicaPML == 0] <- NA
+
+# add country column
+dominicaPML$Country <- "Dominica"
+```
+
+### Clean the St Lucia data
+```{r}
+## Clean the St Lucia data
+# replace blanks with NA
+stluciaPML$InfrastructureElement <- ifelse(grepl("^\\s*$", stluciaPML$InfrastructureElement), NA, stluciaPML$InfrastructureElement)
+  
+# fill empty cells in Infrastructure column
+stluciaPML <- fill(stluciaPML, InfrastructureElement, .direction = "down")
+stluciaPML <- unite(stluciaPML, InfrastructureElement, blank, col = InfrastructureElement, sep = " ")
+
+# replace zeros with NAs
+stluciaPML[stluciaPML == 0] <- NA
+
+# add country column
+stluciaPML$Country <- "St Lucia"
+```
+
+
+### Clean the St Kitts & Nevis data
+```{r}
+## Clean the St Kitts & Nevis data
+# replace blanks with NA
+stkittsnevisPML$InfrastructureElement <- ifelse(grepl("^\\s*$", stkittsnevisPML$InfrastructureElement), NA, stkittsnevisPML$InfrastructureElement)
+  
+# fill empty cells in Infrastructure column
+stkittsnevisPML <- fill(stkittsnevisPML, InfrastructureElement, .direction = "down")
+stkittsnevisPML <- unite(stkittsnevisPML, InfrastructureElement, blank, col = InfrastructureElement, sep = " ")
+
+# replace zeros with NAs
+stkittsnevisPML[stkittsnevisPML == 0] <- NA
+
+# add country column
+stkittsnevisPML$Country <- "St Kitts"
+```
+
+## Merge Three Data Frames
+
+```{r}
+# merge the 3 data frames
+PMLdata <- bind_rows(
+  stkittsnevisPML, 
+  stluciaPML, 
+  dominicaPML)
+
+# remove rows where InfrastructureElement = Total
+PMLdata <- PMLdata%>% 
+  filter(!grepl("Total", InfrastructureElement, ignore.case = TRUE))
+  
+# create a new column called Category
+PMLdata <- PMLdata %>%
+  mutate(Category = case_when(
+    grepl("school", InfrastructureElement, ignore.case = TRUE) ~ "Schools & Colleges",
+    grepl("runway", InfrastructureElement, ignore.case = TRUE) ~ "Runways",
+    grepl("hospital", InfrastructureElement, ignore.case = TRUE) ~ "Hospitals",
+    grepl("wharf", InfrastructureElement, ignore.case = TRUE) ~ "Wharves",
+    grepl("wharves", InfrastructureElement, ignore.case = TRUE) ~ "Wharves",
+    grepl("bins", InfrastructureElement, ignore.case = TRUE) ~ "Waste Management Bins",
+    grepl("public buildings", InfrastructureElement, ignore.case = TRUE) ~ "Buildings",
+    grepl("Public market", InfrastructureElement, ignore.case = TRUE) ~ "Market",
+    grepl("Road", InfrastructureElement, ignore.case = TRUE) ~ "Roads",
+    grepl("power station", InfrastructureElement, ignore.case = TRUE) ~ "Power Gen",
+    grepl("electricity", InfrastructureElement, ignore.case = TRUE) ~ "Power Gen",
+    grepl("health", InfrastructureElement, ignore.case = TRUE) ~ "Hospitals",
+    grepl('government buildings', InfrastructureElement, ignore.case = TRUE) ~ "Buildings",
+    grepl("Buildings ", InfrastructureElement, ignore.case = TRUE) ~ "Buildings",
+    TRUE ~ InfrastructureElement
+  )) %>%
+  select(Category, Country, StructureReplacementCost, ContentsReplacementCost, EquipmentReplacementCost,
+         StructuralDamage, ContentDamage, EquipmentDamage, PML)
+
+# Only show rows where category exists in more than 1 country
+PMLdata <- PMLdata %>%
+  group_by(Category) %>%
+  filter(n_distinct(Country) > 1) %>%
+  ungroup() %>%
+  select(Category, Country, PML, StructureReplacementCost, ContentsReplacementCost, EquipmentReplacementCost,
+         StructuralDamage, ContentDamage, EquipmentDamage) %>% 
+  as.data.frame()
+
+head(PMLdata)
+```
+
+## Analysis
+
+```{r, warning = FALSE, message = FALSE}
+ggplot(PMLdata, aes(x = Category, y = PML, fill = Country)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  ggtitle(
+    "Probable Maximum Loss (PML) for Critical Infrastructure\nin 3 Caribbean Countries",
+    subtitle = "Dominica, St Kitts & Nevis, and St Lucia"
+  ) +
+  theme( 
+    axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    x = "Infrastructure Element",
+    y = "Probable Maximum Loss (PML)"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+We can see from the above graph that Dominica tends to have higher PMLs overall compared to St Kitts and St Lucia. 
+
+
+## Future Recommendations
+
+In this analysis, we only analyzed the 50% upper prediction, 50-year mean return period event tables. In future analyses, it would be interesting to also analyze the remaining tables provided by the Organization of American States:
+
+- 90% upper prediction limit, 50-year mean return period event
+- 50% upper prediction limit, 100-year mean return period event
+- 90% upper prediction limit, 100-year mean return period event
+
+## Sources
+
+“A Probable Maximum Loss Study of Critical Infrastructure in Three ...” Caribbean Disaster Mitigation Project, Organization of American States, www.oas.org/cdmp/document/pml/pmlprint.htm. Accessed 14 Oct. 2023. 
